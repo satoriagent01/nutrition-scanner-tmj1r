@@ -9,10 +9,10 @@
 /**
  * Represents a single ingredient in a meal.
  * @typedef {Object} MealIngredient
- * @property {string} productId - ID of the product
  * @property {string} name - Display name of the product
- * @property {number} grams - Amount in grams
- * @property {Object} nutritionPer100g - Nutritional values per 100g
+ * @property {number} amount - Amount in grams
+ * @property {string} unit - Unit of measurement
+ * @property {Object} nutrition - Nutritional values per 100g
  */
 
 /**
@@ -20,16 +20,13 @@
  * @typedef {Object} Meal
  * @property {string} id - Unique meal ID
  * @property {string} name - Meal name
- * @property {string[]} ingredientIds - List of ingredient product IDs
- * @property {Object.<string, number>} ingredientGrams - productId -> grams mapping
- * @property {Date} createdAt - When the meal was created
+ * @property {MealIngredient[]} ingredients - List of ingredients
  */
 
 /**
  * Nutritional values per 100g of a product.
  * @typedef {Object} NutritionPer100g
- * @property {number} energyKj - Energy in kJ
- * @property {number} energyKcal - Energy in kcal
+ * @property {number} energy - Energy in kcal
  * @property {number} fat - Fat in grams
  * @property {number} saturatedFat - Saturated fat in grams
  * @property {number} carbohydrates - Carbohydrates in grams
@@ -41,9 +38,8 @@
 
 /**
  * Nutritional values for a specific amount of a product.
- * @typedef {Object} NutritionForAmount
- * @property {number} energyKj
- * @property {number} energyKcal
+ * @typedef {Object} MealTotals
+ * @property {number} energy
  * @property {number} fat
  * @property {number} saturatedFat
  * @property {number} carbohydrates
@@ -54,161 +50,98 @@
  */
 
 /**
- * Nutritional values for a complete meal.
- * @typedef {Object} MealNutrition
- * @property {number} energyKj
- * @property {number} energyKcal
- * @property {number} fat
- * @property {number} saturatedFat
- * @property {number} carbohydrates
- * @property {number} sugars
- * @property {number} fiber
- * @property {number} protein
- * @property {number} salt
- * @property {string[]} ingredientNames
+ * MealPlanner class for managing meals and their nutritional calculations.
  */
-
-/**
- * Nutritional values for a specific amount of a product.
- * @param {NutritionPer100g} nutritionPer100g
- * @param {number} grams
- * @returns {NutritionForAmount}
- */
-export function nutritionForAmount(nutritionPer100g, grams) {
-  const factor = grams / 100;
-  return {
-    energyKj: Math.round(nutritionPer100g.energyKj * factor * 10) / 10,
-    energyKcal: Math.round(nutritionPer100g.energyKcal * factor * 10) / 10,
-    fat: Math.round(nutritionPer100g.fat * factor * 10) / 10,
-    saturatedFat: Math.round(nutritionPer100g.saturatedFat * factor * 10) / 10,
-    carbohydrates: Math.round(nutritionPer100g.carbohydrates * factor * 10) / 10,
-    sugars: Math.round(nutritionPer100g.sugars * factor * 10) / 10,
-    fiber: Math.round(nutritionPer100g.fiber * factor * 10) / 10,
-    protein: Math.round(nutritionPer100g.protein * factor * 10) / 10,
-    salt: Math.round(nutritionPer100g.salt * factor * 10) / 10,
-  };
-}
-
-/**
- * Create a new meal.
- * @param {string} name - Meal name
- * @param {string} productId - Product ID
- * @param {number} grams - Amount in grams
- * @param {Object} productDatabase - Map of productId -> { name, nutritionPer100g }
- * @returns {Meal}
- */
-export function createMeal(name, productId, grams, productDatabase) {
-  const product = productDatabase[productId];
-  if (!product) {
-    throw new Error(`Product not found: ${productId}`);
-  }
-  if (grams <= 0) {
-    throw new Error('Grams must be positive');
+class MealPlanner {
+  constructor() {
+    /** @type {Map<string, Meal>} */
+    this.meals = new Map();
+    this.nextId = 1;
   }
 
-  const meal = {
-    id: `${productId}-${Date.now()}`,
-    name,
-    ingredientIds: [productId],
-    ingredientGrams: { [productId]: grams },
-    createdAt: new Date(),
-  };
-  return meal;
-}
-
-/**
- * Add an ingredient to an existing meal.
- * @param {Meal} meal
- * @param {string} productId - Product ID
- * @param {number} grams - Amount in grams
- * @param {Object} productDatabase
- * @returns {Meal} - Updated meal
- */
-export function addIngredient(meal, productId, grams, productDatabase) {
-  const product = productDatabase[productId];
-  if (!product) {
-    throw new Error(`Product not found: ${productId}`);
-  }
-  if (grams <= 0) {
-    throw new Error('Grams must be positive');
+  /**
+   * Create a new meal.
+   * @param {string} name - Meal name
+   * @returns {string} - Meal ID
+   */
+  createMeal(name) {
+    const id = `meal-${this.nextId++}`;
+    this.meals.set(id, { id, name, ingredients: [] });
+    return id;
   }
 
-  const updatedMeal = { ...meal };
-  if (updatedMeal.ingredientIds.includes(productId)) {
-    updatedMeal.ingredientGrams[productId] += grams;
-  } else {
-    updatedMeal.ingredientIds.push(productId);
-    updatedMeal.ingredientGrams[productId] = grams;
-  }
-  return updatedMeal;
-}
-
-/**
- * Calculate total nutrition for a meal.
- * @param {Meal} meal
- * @param {Object} productDatabase - Map of productId -> { name, nutritionPer100g }
- * @returns {MealNutrition}
- */
-export function calculateMealNutrition(meal, productDatabase) {
-  const totals = {
-    energyKj: 0,
-    energyKcal: 0,
-    fat: 0,
-    saturatedFat: 0,
-    carbohydrates: 0,
-    sugars: 0,
-    fiber: 0,
-    protein: 0,
-    salt: 0,
-  };
-
-  const ingredientNames = [];
-
-  for (const productId of meal.ingredientIds) {
-    const product = productDatabase[productId];
-    if (!product) continue;
-
-    const grams = meal.ingredientGrams[productId];
-    const nutrition = nutritionForAmount(product.nutritionPer100g, grams);
-
-    totals.energyKj += nutrition.energyKj;
-    totals.energyKcal += nutrition.energyKcal;
-    totals.fat += nutrition.fat;
-    totals.saturatedFat += nutrition.saturatedFat;
-    totals.carbohydrates += nutrition.carbohydrates;
-    totals.sugars += nutrition.sugars;
-    totals.fiber += nutrition.fiber;
-    totals.protein += nutrition.protein;
-    totals.salt += nutrition.salt;
-
-    ingredientNames.push(product.name);
-  }
-
-  // Round all values
-  for (const key of Object.keys(totals)) {
-    if (typeof totals[key] === 'number') {
-      totals[key] = Math.round(totals[key] * 10) / 10;
+  /**
+   * Add an ingredient to an existing meal.
+   * @param {string} mealId - Meal ID
+   * @param {MealIngredient} ingredient - Ingredient details
+   */
+  addIngredient(mealId, { name, amount, unit, nutrition }) {
+    const meal = this.meals.get(mealId);
+    if (!meal) {
+      throw new Error('Meal not found');
     }
+    meal.ingredients.push({ name, amount, unit, nutrition });
   }
 
-  return {
-    ...totals,
-    ingredientNames,
-  };
+  /**
+   * Get a meal by ID.
+   * @param {string} mealId - Meal ID
+   * @returns {Meal | null}
+   */
+  getMeal(mealId) {
+    return this.meals.get(mealId) || null;
+  }
+
+  /**
+   * Calculate total nutrition for a meal.
+   * @param {string} mealId - Meal ID
+   * @returns {MealTotals | null}
+   */
+  getMealTotals(mealId) {
+    const meal = this.meals.get(mealId);
+    if (!meal) return null;
+
+    const totals = {
+      energy: 0,
+      fat: 0,
+      saturatedFat: 0,
+      carbohydrates: 0,
+      sugars: 0,
+      fiber: 0,
+      protein: 0,
+      salt: 0,
+    };
+
+    for (const ing of meal.ingredients) {
+      const factor = ing.amount / 100;
+      for (const key of Object.keys(totals)) {
+        totals[key] += (ing.nutrition[key] || 0) * factor;
+      }
+    }
+
+    // Round to 2 decimal places
+    for (const key of Object.keys(totals)) {
+      totals[key] = Math.round(totals[key] * 100) / 100;
+    }
+
+    return totals;
+  }
+
+  /**
+   * Get all meals.
+   * @returns {Meal[]}
+   */
+  getAllMeals() {
+    return Array.from(this.meals.values());
+  }
+
+  /**
+   * Delete a meal.
+   * @param {string} mealId - Meal ID
+   */
+  deleteMeal(mealId) {
+    this.meals.delete(mealId);
+  }
 }
 
-/**
- * Get nutrition for a single ingredient in a meal.
- * @param {Meal} meal
- * @param {string} productId
- * @param {Object} productDatabase
- * @returns {NutritionForAmount | null}
- */
-export function getIngredientNutrition(meal, productId, productDatabase) {
-  const product = productDatabase[productId];
-  if (!product || !meal.ingredientIds.includes(productId)) {
-    return null;
-  }
-  const grams = meal.ingredientGrams[productId];
-  return nutritionForAmount(product.nutritionPer100g, grams);
-}
+export { MealPlanner };
