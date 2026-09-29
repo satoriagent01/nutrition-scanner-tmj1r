@@ -1,219 +1,122 @@
 /**
- * Aplicación CLI principal para Nutrition Scanner.
- * Proporciona un menú interactivo para escanear etiquetas,
- * crear platos y trackear la dieta.
+ * Aplicación principal para Nutrition Scanner.
+ * Expone una API unificada que conecta OCR, parser, meal planner y tracker.
  */
 
-import { readFileSync } from 'node:fs';
-import { createInterface } from 'node:readline';
-import { scanImage } from './ocr.js';
-import { parseNutritionLabel } from './parser.js';
-import { createMeal, addFoodToMeal, calculateMealTotals } from './meal-planner.js';
-import { registerMeal, getHistory, getDailySummary } from './tracker.js';
+import { MealPlanner } from "./meal-planner.js";
+import { Tracker } from "./tracker.js";
+import { scanImage } from "./ocr.js";
+import { parseNutritionLabel } from "./parser.js";
 
 /**
- * Crea la interfaz de línea de comandos interactiva.
- * @returns {Promise<void>}
+ * Crea la instancia principal de la aplicación.
+ * @returns {{ addProduct, createMeal, addFoodToMeal, getMealSummary, addMealToDay, getDaySummary, getHistory }}
  */
-async function main() {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+function createApp() {
+  const meals = new MealPlanner();
+  const tracker = new Tracker();
+  const products = new Map();
 
-  const question = (prompt) =>
-    new Promise((resolve) => rl.question(prompt, resolve));
-
-  let running = true;
-
-  while (running) {
-    console.log('\n========================================');
-    console.log('   NUTRITION SCANNER');
-    console.log('========================================');
-    console.log('1. Escanear etiqueta nutricional');
-    console.log('2. Crear plato');
-    console.log('3. Ver historial');
-    console.log('4. Salir');
-    console.log('========================================');
-
-    const choice = await question('Elige una opción: ');
-
-    switch (choice.trim()) {
-      case '1':
-        await handleScan(rl);
-        break;
-      case '2':
-        await handleMealPlanner(rl);
-        break;
-      case '3':
-        await handleHistory(rl);
-        break;
-      case '4':
-        console.log('¡Hasta luego!');
-        running = false;
-        break;
-      default:
-        console.log('Opción no válida.');
-    }
+  /**
+   * Agrega un producto escaneado al catálogo.
+   * @param {string} productId
+   * @param {string} name
+   * @param {Object} nutritionPer100g
+   */
+  function addProduct(productId, name, nutritionPer100g) {
+    products.set(productId, { id: productId, name, nutritionPer100g });
   }
 
-  rl.close();
-}
-
-/**
- * Maneja el flujo de escaneo de etiquetas.
- * @param {import('node:readline').Interface} rl
- */
-async function handleScan(rl) {
-  console.log('\n--- Escanear Etiqueta ---');
-  console.log('Ingresa la ruta de la imagen de la etiqueta:');
-  const imagePath = await question('Ruta: ');
-
-  if (!imagePath.trim()) {
-    console.log('Ruta no proporcionada.');
-    return;
+  /**
+   * Crea un nuevo plato.
+   * @param {string} name
+   * @returns {string} mealId
+   */
+  function createMeal(name) {
+    return meals.createMeal(name);
   }
 
-  try {
-    const imageBuffer = readFileSync(imagePath.trim());
-    console.log('Procesando imagen...');
-
-    const ocrText = scanImage(imageBuffer);
-    console.log('\nTexto extraído:');
-    console.log(ocrText);
-
-    const nutritionInfo = parseNutritionLabel(ocrText);
-    console.log('\nInformación nutricional detectada:');
-    console.log(JSON.stringify(nutritionInfo, null, 2));
-
-    const save = await question('¿Guardar en el meal planner? (s/n): ');
-    if (save.trim().toLowerCase() === 's') {
-      console.log('Información guardada. Puedes usarla al crear un plato.');
-    }
-  } catch (error) {
-    console.error('Error al procesar la imagen:', error.message);
-  }
-}
-
-/**
- * Maneja el flujo del meal planner.
- * @param {import('node:readline').Interface} rl
- */
-async function handleMealPlanner(rl) {
-  console.log('\n--- Meal Planner ---');
-
-  console.log('Ingresa el nombre del plato:');
-  const mealName = await question('Nombre: ');
-
-  if (!mealName.trim()) {
-    console.log('Nombre no proporcionado.');
-    return;
-  }
-
-  const meal = createMeal(mealName.trim());
-
-  let addingFood = true;
-  while (addingFood) {
-    console.log('\nAgregar alimento al plato:');
-    console.log('Ingresa el nombre del alimento:');
-    const foodName = await question('Alimento: ');
-
-    if (!foodName.trim()) {
-      addingFood = false;
-      continue;
-    }
-
-    console.log('Ingresa la cantidad en gramos:');
-    const grams = await question('Gramos: ');
-
-    console.log('Ingresa las calorías por 100g:');
-    const calories = await question('Calorías/100g: ');
-
-    console.log('Ingresa las proteínas por 100g (g):');
-    const protein = await question('Proteínas/100g: ');
-
-    console.log('Ingresa las grasas por 100g (g):');
-    const fat = await question('Grasas/100g: ');
-
-    console.log('Ingresa los carbohidratos por 100g (g):');
-    const carbs = await question('Carbos/100g: ');
-
-    console.log('Ingresa el sodio por 100g (mg):');
-    const sodium = await question('Sodio/100g: ');
-
-    addFoodToMeal(meal.id, {
-      name: foodName.trim(),
-      grams: parseFloat(grams) || 0,
-      caloriesPer100g: parseFloat(calories) || 0,
-      proteinPer100g: parseFloat(protein) || 0,
-      fatPer100g: parseFloat(fat) || 0,
-      carbsPer100g: parseFloat(carbs) || 0,
-      sodiumPer100g: parseFloat(sodium) || 0,
+  /**
+   * Agrega un alimento a un plato.
+   * @param {string} mealId
+   * @param {Object} food - { name, grams, unit, nutritionPer100g }
+   */
+  function addFoodToMeal(mealId, food) {
+    meals.addIngredient(mealId, {
+      name: food.name,
+      amount: food.grams,
+      unit: food.unit || "g",
+      nutrition: food.nutritionPer100g,
     });
-
-    const more = await question('¿Agregar otro alimento? (s/n): ');
-    if (more.trim().toLowerCase() !== 's') {
-      addingFood = false;
-    }
   }
 
-  const totals = calculateMealTotals(meal.id);
-  console.log('\n--- Resumen del plato ---');
-  console.log(`Plato: ${meal.name}`);
-  console.log(`Calorías: ${totals.calories} kcal`);
-  console.log(`Proteínas: ${totals.protein} g`);
-  console.log(`Grasas: ${totals.fat} g`);
-  console.log(`Carbohidratos: ${totals.carbs} g`);
-  console.log(`Sodio: ${totals.sodium} mg`);
-
-  const save = await question('¿Guardar este plato en el tracker? (s/n): ');
-  if (save.trim().toLowerCase() === 's') {
-    registerMeal(meal);
-    console.log('Plato guardado en el tracker.');
-  }
-}
-
-/**
- * Maneja la visualización del historial.
- * @param {import('node:readline').Interface} rl
- */
-async function handleHistory(rl) {
-  console.log('\n--- Historial ---');
-
-  console.log('¿Qué día quieres ver? (YYYY-MM-DD, o "hoy" para hoy):');
-  const dateInput = await question('Fecha: ');
-
-  const date = dateInput.trim().toLowerCase() === 'hoy'
-    ? new Date().toISOString().split('T')[0]
-    : dateInput.trim();
-
-  const history = getHistory(date);
-  const summary = getDailySummary(date);
-
-  if (history.length === 0) {
-    console.log('No hay comidas registradas para esta fecha.');
-    return;
+  /**
+   * Obtiene el resumen nutricional de un plato.
+   * @param {string} mealId
+   * @returns {Object|null}
+   */
+  function getMealSummary(mealId) {
+    return meals.getMealTotals(mealId);
   }
 
-  console.log(`\nComidas del ${date}:`);
-  history.forEach((meal, index) => {
-    console.log(`\n--- Plato ${index + 1}: ${meal.name} ---`);
-    meal.foods.forEach((food) => {
-      console.log(`  - ${food.name}: ${food.grams}g`);
-    });
-  });
+  /**
+   * Registra un plato en el historial de un día.
+   * @param {string} mealId
+   * @param {string} date - YYYY-MM-DD
+   */
+  function addMealToDay(mealId, date) {
+    const meal = meals.getMeal(mealId);
+    if (!meal) throw new Error("Meal not found");
 
-  console.log('\n--- Resumen del día ---');
-  console.log(`Calorías: ${summary.calories} kcal`);
-  console.log(`Proteínas: ${summary.protein} g`);
-  console.log(`Grasas: ${summary.fat} g`);
-  console.log(`Carbohidratos: ${summary.carbs} g`);
-  console.log(`Sodio: ${summary.sodium} mg`);
+    const totals = meals.getMealTotals(mealId);
+    const foods = meal.ingredients.map((ing) => ({
+      name: ing.name,
+      grams: ing.amount,
+      nutritionPer100g: ing.nutrition,
+    }));
+
+    tracker.registerMeal({ id: mealId, name: meal.name, foods }, totals, date);
+  }
+
+  /**
+   * Obtiene el resumen del día.
+   * @param {string} date
+   * @returns {Object|null}
+   */
+  function getDaySummary(date) {
+    return tracker.getDailySummary(date);
+  }
+
+  /**
+   * Obtiene el historial.
+   * @param {string} [date] - Opcional, si no se pasa devuelve todo
+   * @returns {Array}
+   */
+  function getHistory(date) {
+    return tracker.getHistory(date);
+  }
+
+  /**
+   * Escanea una imagen y devuelve la información nutricional extraída.
+   * @param {Buffer} imageBuffer
+   * @returns {Object}
+   */
+  function scanAndParse(imageBuffer) {
+    const text = scanImage(imageBuffer);
+    return parseNutritionLabel(text);
+  }
+
+  return {
+    addProduct,
+    createMeal,
+    addFoodToMeal,
+    getMealSummary,
+    addMealToDay,
+    getDaySummary,
+    getHistory,
+    scanAndParse,
+    products,
+  };
 }
 
-export { main };
-
-// Ejecutar si se ejecuta directamente
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(console.error);
-}
+export { createApp };
