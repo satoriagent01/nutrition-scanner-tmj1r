@@ -1,0 +1,12 @@
+{
+  "name": "nutrition-scanner",
+  "version": "1.0.0",
+  "description": "App gratuita para escanear etiquetas nutricionales y trackear tu dieta",
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/**/*.test.js",
+    "start": "node src/app.js"
+  },
+  "keywords": ["nutrition", "scanner", "tracker", "meal-planner"],
+  "license": "MIT"
+}
